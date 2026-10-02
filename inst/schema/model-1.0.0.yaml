@@ -1,0 +1,147 @@
+dialect: model.form/schema/1
+contract_version: 1.0.0
+root: model
+definitions:
+  text:
+    type: string
+    min_length: 1
+  id:
+    type: string
+    pattern: ^[A-Za-z][A-Za-z0-9_.-]*$
+  version:
+    ref: text
+  boolean:
+    type: boolean
+  number:
+    type: number
+  positive:
+    type: integer
+    minimum: 1
+  count:
+    type: integer
+    minimum: 0
+  scalar:
+    type: scalar
+    nullable: true
+  type:
+    type: string
+    enum:
+    - string
+    - integer
+    - number
+    - boolean
+    - date
+    - datetime
+  form:
+    type: mapping
+    required:
+    - id
+    - version
+    properties:
+      id:
+        ref: id
+      version:
+        ref: version
+  reference_use:
+    shorthand: {ref: id}
+    type: mapping
+    required:
+    - id
+    properties:
+      id:
+        ref: id
+      severity:
+        type: string
+        enum:
+        - error
+        - warning
+  field:
+    type: mapping
+    required:
+    - type
+    properties:
+      mandatory:
+        ref: boolean
+      location:
+        type: string
+        pattern: ^[A-Z]+[1-9][0-9]*$
+      type:
+        ref: type
+      enum:
+        type: sequence
+        items:
+          ref: scalar
+        min_items: 1
+      minimum:
+        ref: number
+      maximum:
+        ref: number
+      pattern:
+        ref: text
+      unique:
+        ref: boolean
+      reference:
+        ref: reference_use
+      required_field:
+        ref: id
+      default:
+        ref: scalar
+  fields:
+    type: mapping
+    key_pattern: ^[A-Za-z][A-Za-z0-9_.-]*$
+    values:
+      ref: field
+    min_items: 0
+  layout:
+    type: mapping
+    required:
+    - kind
+    properties:
+      kind:
+        type: string
+        enum:
+        - cells
+        - table
+      start_row:
+        ref: positive
+      column_count:
+        ref: count
+      row_count:
+        ref: count
+  sheet:
+    type: mapping
+    required:
+    - layout
+    - fields
+    properties:
+      layout:
+        ref: layout
+      fields:
+        ref: fields
+  sheets:
+    type: mapping
+    key_pattern: ^[A-Za-z][A-Za-z0-9_.-]*$
+    values:
+      ref: sheet
+    min_items: 1
+  model:
+    type: mapping
+    required:
+    - schema_version
+    - form
+    - references
+    - sheets
+    properties:
+      schema_version:
+        type: string
+        enum:
+        - 1.0.0
+      form:
+        ref: form
+      references:
+        type: sequence
+        items:
+          ref: id
+        min_items: 0
+      sheets:
+        ref: sheets

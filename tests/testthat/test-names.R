@@ -1,0 +1,15 @@
+test_that("a model name resolves exactly one conventional file", {
+  directory <- tempfile()
+  dir.create(directory)
+  on.exit(unlink(directory, recursive = TRUE))
+  file.copy(example_path(), file.path(directory, "survey-form.yaml"))
+  model <- load_form_model("survey", directory)
+  expect_identical(form_definition(model), form_definition(example_model()))
+  expect_false("resource" %in% names(form_metadata(model)))
+  expect_error(load_form_model("other", directory), "does not exist")
+  expect_error(load_form_model("../survey", directory), "expected a model name")
+  expect_error(load_form_model("/survey", directory), "expected a model name")
+  # Similar filenames never become fallback candidates.
+  file.rename(file.path(directory, "survey-form.yaml"), file.path(directory, "survey-form-2.yaml"))
+  expect_error(load_form_model("survey", directory), "does not exist")
+})
