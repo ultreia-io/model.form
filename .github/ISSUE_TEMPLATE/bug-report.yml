@@ -1,0 +1,16 @@
+name: Bug report
+description: Report a reproducible model.form problem
+assignees: [ultreiaio]
+labels: ["type::bug", "priority::normal", "status::new"]
+body:
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Offline synthetic reproduction
+      description: Include package version, YAML, expected behaviour, and diagnostics. Remove private data.
+    validations:
+      required: true
+  - type: textarea
+    id: session
+    attributes:
+      label: R session information

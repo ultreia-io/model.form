@@ -1,0 +1,53 @@
+url: https://ultreia-io.github.io/model.form/
+template:
+  bootstrap: 5
+  light-switch: true
+reference:
+  - title: Load and select
+    contents: [load_form_model, read_form_model, select_form_model, form_resource]
+  - title: Check and construct
+    contents: [form_schema, check_form_model, as_form_model]
+  - title: Inspect
+    contents:
+      - form_definition
+      - form_metadata
+      - form_fields
+      - form_field
+      - form_sheets
+      - form_layout
+      - form_references
+      - print.form_model
+      - print.form_model_check
+articles:
+  - title: Guides
+    navbar: Guides
+    contents: [model.form, model-authoring, downstream-packages]
+  - title: Development
+    contents: [articles/coverage]
+navbar:
+  structure:
+    left: [intro, reference, articles, news, coverage, community]
+    right: [search, github, lightswitch]
+  components:
+    coverage:
+      text: Coverage
+      href: articles/coverage.html
+    intro:
+      text: Get started
+      href: articles/model.form.html
+    community:
+      text: Community
+      menu:
+        - text: Contributing
+          href: CONTRIBUTING.html
+        - text: Maintainer guide
+          href: DEVELOPMENT.html
+        - text: Security policy
+          href: SECURITY.html
+        - text: Code of conduct
+          href: CODE_OF_CONDUCT.html
+# Avoid repository-discovery HTTP requests; all navigation links are explicit.
+home:
+  sidebar: false
+news:
+  cran_dates: false

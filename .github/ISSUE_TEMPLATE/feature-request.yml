@@ -1,0 +1,12 @@
+name: Feature request
+description: Propose a neutral model capability
+assignees: [ultreiaio]
+labels: ["type::feature", "priority::normal", "status::new"]
+body:
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Use case and proposed contract
+      description: Explain a concrete requirement and its compatibility impact.
+    validations:
+      required: true

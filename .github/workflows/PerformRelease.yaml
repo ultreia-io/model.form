@@ -1,0 +1,149 @@
+name: Perform Release
+on:
+  # Register manual workflows when bootstrapping a new repository.
+  push:
+    branches: [develop]
+    paths: [.github/workflows/PerformRelease.yaml]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact x.y.z already recorded in DESCRIPTION and NEWS
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: release
+  cancel-in-progress: false
+jobs:
+  prepare:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.candidate.outputs.sha }}
+      tag: ${{ steps.candidate.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: develop
+          fetch-depth: 0
+      - name: Identify candidate
+        id: candidate
+        env:
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$(awk '/^Package:/ {print $2}' DESCRIPTION)" = model.form
+          test "$(awk '/^Version:/ {print $2}' DESCRIPTION)" = "$VERSION"
+          grep -Fxq "# model.form $VERSION" NEWS.md
+          sha=$(git rev-parse HEAD)
+          if git show-ref --verify --quiet "refs/tags/v$VERSION"; then
+            test "$(git rev-list -n 1 "v$VERSION")" = "$sha"
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Candidate: $sha (model.form $VERSION)" >> "$GITHUB_STEP_SUMMARY"
+  build:
+    needs: prepare
+    uses: ./.github/workflows/Build.yaml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+    secrets: inherit
+  test:
+    needs: prepare
+    uses: ./.github/workflows/Test.yaml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+    secrets: inherit
+  publish:
+    needs: [prepare, build, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      VERSION: ${{ inputs.version }}
+      CANDIDATE: ${{ needs.prepare.outputs.sha }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      _R_CHECK_CRAN_INCOMING_: 'false'
+      _R_CHECK_CRAN_INCOMING_REMOTE_: 'false'
+      _R_CHECK_SYSTEM_CLOCK_: 'false'
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
+      - uses: r-lib/actions/setup-r@v2.12.1
+        with:
+          r-version: release
+          use-public-rspm: true
+      - uses: r-lib/actions/setup-pandoc@v2.12.1
+      - uses: r-lib/actions/setup-r-dependencies@v2.12.1
+        with:
+          extra-packages: |
+            any::rcmdcheck
+            any::pkgdown
+            local::.
+          needs: website
+      - name: Build and verify release archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          mkdir -p build
+          (cd build && R CMD build --no-manual ..)
+          Rscript -e 'rcmdcheck::rcmdcheck(paste0("build/model.form_", Sys.getenv("VERSION"), ".tar.gz"), args=c("--no-manual", "--as-cran"), check_dir="build/check", error_on="note")'
+          (cd build && sha256sum "model.form_${VERSION}.tar.gz" > "model.form_${VERSION}.tar.gz.sha256")
+          Rscript tools/build-site.R
+      - name: Promote exact candidate and publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${VERSION:?}" "${CANDIDATE:?}" "${TAG:?}" "${GITHUB_REPOSITORY:?}"
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$TAG" = "v$VERSION"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          test "$(awk '/^Version:/ {print $2}' DESCRIPTION)" = "$VERSION"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git config commit.gpgSign false
+          git config tag.gpgSign false
+          git fetch --prune --tags origin
+          if git show-ref --verify --quiet "refs/tags/$TAG"; then
+            test "$(git rev-list -n 1 "$TAG")" = "$CANDIDATE"
+            git merge-base --is-ancestor "$CANDIDATE" origin/main
+          else
+            if git show-ref --verify --quiet refs/remotes/origin/main; then
+              git merge-base --is-ancestor origin/main "$CANDIDATE"
+            fi
+            git merge-base --is-ancestor "$CANDIDATE" origin/develop
+            git branch -f main "$CANDIDATE"
+            git switch -C develop origin/develop
+            git merge --no-ff "$CANDIDATE" -m "Integrate model.form $VERSION release"
+            git tag -a "$TAG" "$CANDIDATE" -m "model.form $VERSION"
+            git push --atomic origin main:main develop:develop "refs/tags/$TAG"
+          fi
+          # A rerun may finish a draft but must never overwrite published assets.
+          if gh release view "$TAG" --json isDraft --jq '.isDraft' > /tmp/model-form-release-state; then
+            if test "$(cat /tmp/model-form-release-state)" = false; then
+              echo "Release already published; assets preserved."
+              exit 0
+            fi
+          else
+            gh release create "$TAG" --verify-tag --draft --title "model.form $VERSION" --generate-notes
+          fi
+          gh release upload "$TAG" "build/model.form_${VERSION}.tar.gz" "build/model.form_${VERSION}.tar.gz.sha256" --clobber
+          gh release edit "$TAG" --draft=false
+  website:
+    needs: [prepare, publish]
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/Website.yaml
+    with:
+      ref: ${{ needs.prepare.outputs.tag }}
+    secrets: inherit
