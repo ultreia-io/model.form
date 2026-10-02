@@ -1,0 +1,263 @@
+---
+title: "Authoring model definitions"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Authoring model definitions}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+library(model.form)
+```
+
+
+## Versions and authority
+
+`schema_version` selects this package's contract. Version `1.0.0` is supported by package `0.1.0`.
+
+`form.version` identifies the described model. `schema_version` selects this package's YAML contract.
+
+These are independent strings. Quote versions and codes, including `"01"` and `"2026.1"`.
+
+Comments carry no contract information.
+
+## YAML profile
+
+The only runtime parser is `yaml` (libyaml, YAML 1.1). The package adds structural and semantic checking in R.
+
+Use one UTF-8 document with no document markers, directives, tags, anchors, aliases, or merge keys.
+
+Mappings have unique string keys. Sequences become unnamed lists, including singleton and empty sequences.
+
+Unknown properties are errors at every level. No type coercion is applied.
+
+Omitted-value defaults for `mandatory` and reference severity are described below.
+
+Use lowercase `true` and `false`. YAML 1.1 also parses `yes`, `no`, `on`, and `off` as booleans; quote such codes.
+
+Use decimal integers and finite numbers. YAML 1.1 parses leading-zero integers as octal; quote codes.
+
+Unquoted `null` and `~` become `NULL`. Empty scalars are null, not empty strings. `""` is an empty string.
+
+Only a nonmandatory field's `default` or enum values can be null. Required structural properties cannot be null.
+
+An absent `default` and `default: null` are distinct. Check property presence with `"default" %in% names(field)`.
+
+Dates are ISO strings (`YYYY-MM-DD`); datetimes are UTC strings (`YYYY-MM-DDTHH:MM:SSZ`).
+
+The parser never evaluates YAML expressions, regardless of the `yaml.eval.expr` R option.
+
+## Full example
+
+The following is the actual installed resource, not a second editable copy.
+
+```{r, results='asis', echo=FALSE}
+cat("```yaml\n", paste(readLines(form_resource("examples/survey-form.yaml", "model.form")), collapse="\n"), "\n```\n", sep="")
+```
+
+## Structural schema
+
+`inst/schema/model-1.0.0.yaml` is the single editable structural schema. `form_schema()` reads the installed file.
+
+The dialect is `model.form/schema/1`, a small schema language; it is deliberately not JSON Schema.
+
+Its interpreter supports these keywords:
+
+| Keyword      | Meaning                                                     |
+| ------------ | ----------------------------------------------------------- |
+| `ref`        | Resolve a named definition                                  |
+| `type`       | mapping, sequence, string, boolean, integer, number, scalar |
+| `required`   | Required mapping keys                                       |
+| `shorthand`  | Schema for a scalar alternative to a mapping                |
+| `properties` | Allowed keys and their schemas; all other keys fail         |
+| `items`      | Sequence item schema                                        |
+| `min_items`  | Minimum sequence length                                     |
+| `min_length` | Minimum string length                                       |
+| `pattern`    | Structural string pattern                                   |
+| `enum`       | Allowed scalar values                                       |
+| `minimum`    | Inclusive numeric lower bound                               |
+| `nullable`   | Whether explicit null is allowed                            |
+
+The schema is package-owned, never supplied or overridden by model authors. Unsupported contract versions fail.
+
+This avoids a JavaScript runtime dependency. Semantic invariants remain explicit R checks with behavioural tests.
+
+```{r}
+schema <- form_schema()
+names(schema$definitions)
+schema$definitions$field
+```
+
+## Identifiers and field meaning
+
+Identifiers start with an ASCII letter and then contain letters, digits, dots, underscores, or hyphens.
+
+Sheet names and local field names are mapping keys. Full field IDs are derived as `<sheet>.<field>`.
+
+Field types are `string`, `integer`, `number`, `boolean`, `date`, and `datetime`.
+
+An enum uses `enum` on one of these types; see [Enumerated fields](#enumerated-fields).
+
+`mandatory: true` requires a filled, non-null value. Omission means the field may be empty.
+
+A `default` is descriptive metadata; this package never fills absent submitted values.
+
+`type` is explicit for every field. Write `mandatory` first when true, then cell `location`, `type`, and other rules.
+
+## Omitted values and effective fields
+
+The compact YAML declaration omits common values. The documented omitted properties
+are resolved by `model.form`:
+
+| Property                             | When omitted                      | Effective accessor value |
+| ------------------------------------ | --------------------------------- | ------------------------ |
+| `mandatory`                          | The field may be absent or null   | `FALSE`                  |
+| `severity` on a reference constraint | An unknown code is an error       | `"error"`                |
+
+For example, these declarations are equivalent when read through `form_fields()`:
+
+```yaml
+PORT_CODE: {type: string, reference: refs_admin.ports}
+COMMENT: {type: string}
+```
+
+```yaml
+PORT_CODE: {mandatory: false, type: string, reference: {id: refs_admin.ports, severity: error}}
+COMMENT: {mandatory: false, type: string}
+```
+
+`form_definition()` returns the compact declaration and therefore preserves
+omission. `form_fields()` returns effective field definitions: it adds
+`mandatory = FALSE`, expands reference IDs with severity `"error"`, derives the full
+`<sheet>.<field>` ID, and derives table columns from field order.
+
+No other optional property receives a value. In particular:
+
+* omitted `default` means no default metadata is declared;
+* `default: null` explicitly declares null metadata;
+* omitted validation rules add no checks;
+* omitted `row_count` means no exact row extent is declared.
+
+A declared `default` never fills an absent submitted value. It is metadata for
+consumers. Validation and data-loading packages decide whether they use it.
+
+Every sheet present in the `sheets` mapping is mandatory. This rule is inherent
+in the model contract; there is no omitted sheet property being defaulted.
+
+## Declarative constraints
+
+* `mandatory`: requires a filled value; omitted means `false`.
+* `enum`: nonempty list of distinct, typed values; nonmandatory fields may include null.
+* `minimum`, `maximum`: inclusive bounds for numbers and integers; integer bounds must be whole numbers.
+* `pattern`: a valid PCRE regular expression for string, date, or datetime fields.
+* `unique`: declares uniqueness within the field's repeated table values.
+* `reference`: a declared ID (`reference: stations`) defaults to `error`; use `{id: stations, severity: warning}` for warnings.
+* `required_field`: require a value when the named local field is filled; see [Conditional fields](#conditional-fields).
+
+The required field must be on the same sheet and cannot be the field itself. Cycles are allowed: no rules execute here.
+
+References are names of caller-supplied string code lists.
+
+They contain neither database locations nor reference data. The caller supplies snapshots to downstream validation.
+
+Defaults and enum values must match the field type, mandatory policy, numeric bounds, and pattern.
+
+Defaults must also belong to an enum when one is declared. References are checked structurally, without fetching data.
+
+Blank-cell handling, severity for other rules, and execution belong to `model.validation`.
+
+### Conditional fields
+
+`required_field` names one companion field on the same sheet:
+
+```yaml
+unit: {type: string, enum: [cm, m], required_field: length}
+```
+
+The unit is required when `length` is filled, including when its value is zero.
+
+For a table, the dependency is evaluated in the same row. The property accepts one name, never a list or matching mode.
+
+This condition does not forbid a value when the companion field is empty.
+
+### Enumerated fields
+
+`enum` restricts the allowed values of a field; it is not a separate field type. Do not write `type: enum`.
+
+For a string field, use this field fragment:
+
+```yaml
+type: string
+default: cm
+enum: [cm, m]
+```
+
+For an integer field:
+
+```yaml
+type: integer
+default: 2
+enum: [1, 2, 3]
+```
+
+The list must be nonempty, contain no duplicates, and use values compatible with the declared field type.
+
+A declared default must belong to the enum. Include `null` only for a nonmandatory field.
+
+Quote numeric-looking string codes, for example `enum: ["01", "02"]` on a `string` field.
+
+These checks validate the declaration. Checking submitted values against it belongs to downstream validation.
+
+## Workbook layouts
+
+`sheets` is an ordered mapping keyed by physical worksheet name. Every declared sheet is mandatory.
+
+Sheet names must be unique ignoring case. Declaration order records expected sheet order.
+
+Each sheet's `fields` mapping is keyed by local field name.
+
+Put each sheet's `layout` before its `fields`.
+
+Cell fields require an uppercase A1 address, such as `location: E3` or `location: AA12`.
+
+```yaml
+META:
+  layout: {kind: cells, row_count: 12, column_count: 5}
+  fields:
+    form_version: {mandatory: true, location: E3, type: string, pattern: '^1\.0\.0$'}
+```
+
+`form_fields()` derives numeric `row` and `column` coordinates. Raw declarations retain only `location`.
+
+For a table, field order is column order; fields must omit `location`.
+
+Table layouts require `start_row` and `column_count`. The column count must equal
+the number of declared fields. Rows before `start_row` are preamble; their text is not part of the definition.
+
+Cell layouts require `column_count`. Every fixed field must lie within declared
+dimensions. All coordinates are one-based integers.
+
+An optional `row_count` declares an exact physical row extent. Empty table
+sheets may use `column_count: 0` when they declare no fields.
+
+Field locations must lie within declared dimensions. Empty tables may start immediately after the last declared row.
+
+Multiple fields cannot occupy one location. Fields retain their declaration order.
+
+An empty placeholder sheet uses `fields: {}`.
+
+## Evolution
+
+Changes to model meaning should change `form.version`.
+
+Schema evolution requires an explicit new contract version; unknown properties do not act as extension points.
+
+## Diagnostics
+
+`check_form_model()` returns `valid` and a diagnostic data frame with `resource`, `path`, and `message` columns.
+
+Property paths start at `$` and use mapping keys or one-based sequence indices.
+
+Structural errors are collected first. Semantic checks run only after structural success.

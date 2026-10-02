@@ -1,0 +1,164 @@
+---
+title: "Getting started"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Getting started}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+library(model.form)
+```
+
+
+The package turns a YAML form description into a checked R list, then provides functions to inspect it.
+
+It describes fields, constraints, and workbook layouts. It does not read or validate completed workbooks.
+
+To try the examples from a project checkout, first run this in the project directory:
+
+```r
+pkgload::load_all()
+```
+
+For an installed package, use `library(model.form)` instead.
+
+## Load an installed example
+
+```{r}
+directory <- system.file("examples", package = "model.form")
+m <- load_form_model("survey", directory)
+m
+```
+
+The example ships under `inst/examples/`, so it remains available after installation.
+
+The name `survey` resolves to `survey-form.yaml` in that directory. This is the standard naming convention.
+
+Choose the version directory explicitly; the loader never searches for a latest version.
+
+`read_form_model(path, package)` remains available when you need to load an explicit filename.
+
+## What a model contains
+
+A `form_model` is the checked definition itself, with an S3 class:
+
+```{r}
+names(m)
+```
+
+It directly contains the form identity, versions, references, and sheets.
+
+Sheets use worksheet names, and their fields use local field names:
+
+```{r}
+names(m$sheets)
+names(m$sheets$Metadata$fields)
+m$sheets$Metadata$fields$submission[c("mandatory", "location", "type")]
+```
+
+The YAML path is used in loading errors, then discarded after a successful load.
+
+The S3 class selects the compact `print()` method shown above. It does not make the object immutable.
+
+## How the R code fits together
+
+The files organize functions in one package namespace. You do not source each file separately.
+
+| File        | Responsibility                                          |
+| ----------- | ------------------------------------------------------- |
+| `read.R`    | Locate resources and parse the restricted YAML format    |
+| `check.R`   | Check definitions and construct valid model objects      |
+| `inspect.R` | Retrieve definition parts and print summaries            |
+
+Loading follows this call sequence:
+
+```text
+read_form_model()
+  +-- form_resource()       Resolve the path when package is supplied
+  +-- read_yaml_data()
+  |     +-- yaml_profile()  Reject excluded YAML constructs
+  |     +-- yaml::yaml.load() Parse data without evaluating expressions
+  +-- as_form_model()
+        +-- check_form_model()
+              +-- form_schema()    Load the package-owned structural schema
+              +-- schema_check()   Check properties and value types
+              +-- semantic_check() Check references and consistency
+```
+
+For example, structural checking rejects a field without a `type` or a string where a number is required.
+
+Semantic checking rejects duplicate cell coordinates or a numeric minimum greater than its maximum.
+
+Semantic checks run only after structural checks pass. This avoids follow-on errors caused by malformed definitions.
+
+`check_form_model()` returns findings; `as_form_model()` raises an error if they prevent constructing a valid model.
+
+Functions such as `yaml_profile()` and `schema_check()` are internal helpers, not entry points for callers.
+
+For code review, start with `read_form_model()`, then `as_form_model()`, `check_form_model()`, and `form_field()`.
+
+## Inspect fields and locations
+
+```{r}
+names(form_fields(m, "Observations"))
+field <- form_field(m, "Observations.unit")
+field$type
+field$enum
+layout <- form_layout(m, "Observations")
+layout$start_row
+form_field(m, "Metadata.submission")[c("row", "column")]
+```
+
+`form_field()` finds a field by its exact ID across all sheets. Collection accessors name their entries by ID.
+
+`form_layout()` uses the physical worksheet name.
+
+Lists retain declaration order. Locations use one-based row and column numbers.
+
+Accessors return declarations; they do not execute constraints or recheck the model.
+
+For example, downstream validation must implement the declared condition and supply reference data:
+
+```{r}
+field$required_field
+form_field(m, "Observations.station")$reference
+form_references(m)
+```
+
+`form_references()` describes required datasets; it neither downloads them nor connects to a database.
+
+## Diagnose a definition
+
+```{r}
+d <- form_definition(m)
+d$sheets[[2]]$fields[[1]]$reference <- "missing"
+result <- check_form_model(d, resource = "my-definition.yaml")
+result$diagnostics
+stopifnot(!result$valid)
+```
+
+`as_form_model()` and `read_form_model()` throw `model_form_error` when a definition is invalid.
+
+```{r}
+error <- tryCatch(as_form_model(d, "my-definition.yaml"), model_form_error = identity)
+error$path
+error$diagnostics
+```
+
+## Edit a copy
+
+```{r}
+d <- form_definition(m)
+d$form$version <- "2026.2"
+copy <- as_form_model(d, "edited in memory")
+stopifnot(form_metadata(m)$form$version != form_metadata(copy)$form$version)
+```
+
+Editing the extracted definition leaves `m` unchanged. `as_form_model()` checks the edited copy before returning it.
+
+Directly changing `m` bypasses those checks. Reconstruct the model after edits.
+
+No reference data, credentials, workbook readers, or live services are needed for these examples.

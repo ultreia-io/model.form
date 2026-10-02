@@ -1,0 +1,70 @@
+---
+title: "Distributing models in a downstream package"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Distributing models in a downstream package}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+library(model.form)
+```
+
+
+## Package layout
+
+A downstream package owns concrete models. Store each definition as `<name>-form.yaml` under `inst/forms/`.
+
+Use explicit subdirectories when shipping several versions of the same named model.
+
+```text
+exampleforms/
+  DESCRIPTION
+  NAMESPACE
+  R/survey.R
+  inst/forms/survey-form.yaml
+```
+
+Declare `Imports: model.form` in `DESCRIPTION`. Supply a documented wrapper with explicit resource selection.
+
+```r
+# In exampleforms/R/survey.R:
+survey_model <- function() {
+  model.form::select_form_model(
+    "forms/survey-form.yaml",
+    id = "survey", version = "2026.1",
+    package = "exampleforms"
+  )
+}
+```
+
+`package` names the installed package containing the YAML resource.
+
+## Runnable equivalent
+
+The bundled example uses exactly the same installed-resource mechanism.
+
+```{r}
+path <- form_resource("examples/survey-form.yaml", "model.form")
+stopifnot(file.exists(path))
+m <- select_form_model(path, "survey", "2026.1")
+form_references(m)
+```
+
+Selection reads only supplied paths, validates all of them, and requires exactly one matching identity tuple.
+
+Supply an explicit list of files to support multiple versions. There is no directory scan or latest-version fallback.
+
+Package-relative paths cannot escape the installed package, including through symbolic links.
+
+## Pass models and dependencies explicitly
+
+A future validator accepts a model, submitted data, and caller-supplied reference snapshots.
+
+A form package must not fetch snapshots, connect to a database, or write files during package loading.
+
+Keep concrete domain definitions in the downstream package. Keep loader destinations and mappings in loader packages.
+
+Run model checks in downstream tests for every shipped resource. Reserve validation equivalence tests for the full proof.
